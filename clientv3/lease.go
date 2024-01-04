@@ -305,6 +305,7 @@ func (l *lessor) KeepAlive(ctx context.Context, id LeaseID) (<-chan *LeaseKeepAl
 
 func (l *lessor) KeepAliveOnce(ctx context.Context, id LeaseID) (*LeaseKeepAliveResponse, error) {
 	for {
+		// l.lg.Info("[check lease] client keepalive once start", zap.Int64("lease-id", int64(id)))
 		resp, err := l.keepAliveOnce(ctx, id)
 		if err == nil {
 			if resp.TTL <= 0 {
@@ -401,21 +402,25 @@ func (l *lessor) keepAliveOnce(ctx context.Context, id LeaseID) (*LeaseKeepAlive
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	//l.lg.Info("[check lease] client LeaseKeepAlive once start", zap.Int64("lease-id", int64(id)))
 	stream, err := l.remote.LeaseKeepAlive(cctx, l.callOpts...)
 	if err != nil {
 		return nil, toErr(ctx, err)
 	}
 
+	//l.lg.Info("[check lease] client stream send", zap.Int64("lease-id", int64(id)))
 	err = stream.Send(&pb.LeaseKeepAliveRequest{ID: int64(id)})
 	if err != nil {
 		return nil, toErr(ctx, err)
 	}
 
+	//l.lg.Info("[check lease] client stream recv", zap.Int64("lease-id", int64(id)))
 	resp, rerr := stream.Recv()
 	if rerr != nil {
 		return nil, toErr(ctx, rerr)
 	}
 
+	//l.lg.Info("[check lease] client stream recv end", zap.Int64("lease-id", int64(id)))
 	karesp := &LeaseKeepAliveResponse{
 		ResponseHeader: resp.GetHeader(),
 		ID:             LeaseID(resp.ID),

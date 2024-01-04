@@ -876,7 +876,10 @@ func (s *EtcdServer) purgeFile() {
 
 func (s *EtcdServer) Cluster() api.Cluster { return s.cluster }
 
-func (s *EtcdServer) ApplyWait() <-chan struct{} { return s.applyWait.Wait(s.getCommittedIndex()) }
+func (s *EtcdServer) ApplyWait() <-chan struct{} {
+	//s.lg.Info("[check lease] start", zap.Uint64("appliedIndex", s.getAppliedIndex()), zap.Uint64("committedIndex", s.getCommittedIndex()))
+	return s.applyWait.Wait(s.getCommittedIndex())
+}
 
 type ServerPeer interface {
 	ServerV2

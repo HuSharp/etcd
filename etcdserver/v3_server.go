@@ -289,6 +289,7 @@ func (s *EtcdServer) LeaseRenew(ctx context.Context, id lease.LeaseID) (int64, e
 			return 0, err
 		}
 
+		s.lg.Info("[check lease] renewing lease", zap.Int64("lease-id", int64(id)))
 		ttl, err := s.lessor.Renew(id)
 		if err == nil { // already requested to primary lessor(leader)
 			return ttl, nil
@@ -309,6 +310,8 @@ func (s *EtcdServer) LeaseRenew(ctx context.Context, id lease.LeaseID) (int64, e
 		}
 		for _, url := range leader.PeerURLs {
 			lurl := url + leasehttp.LeasePrefix
+			lg := s.getLogger()
+			lg.Info("[check lease] renewing lease", zap.Int64("lease-id", int64(id)), zap.String("leader", lurl))
 			ttl, err := leasehttp.RenewHTTP(cctx, id, lurl, s.peerRt)
 			if err == nil || err == lease.ErrLeaseNotFound {
 				return ttl, err

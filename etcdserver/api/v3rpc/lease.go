@@ -16,14 +16,14 @@ package v3rpc
 
 import (
 	"context"
-	"io"
-
 	"go.etcd.io/etcd/etcdserver"
 	"go.etcd.io/etcd/etcdserver/api/v3rpc/rpctypes"
 	pb "go.etcd.io/etcd/etcdserver/etcdserverpb"
 	"go.etcd.io/etcd/lease"
-
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"io"
 )
 
 type LeaseServer struct {
@@ -88,12 +88,14 @@ func (ls *LeaseServer) LeaseLeases(ctx context.Context, rr *pb.LeaseLeasesReques
 
 func (ls *LeaseServer) LeaseKeepAlive(stream pb.Lease_LeaseKeepAliveServer) (err error) {
 	errc := make(chan error, 1)
+	ls.lg.Info("[check lease] server LeaseKeepAlive recv start")
 	go func() {
 		errc <- ls.leaseKeepAlive(stream)
 	}()
 	select {
 	case err = <-errc:
 	case <-stream.Context().Done():
+		ls.lg.Info("[check lease] server stream Context done")
 		// the only server-side cancellation is noleader for now.
 		err = stream.Context().Err()
 		if err == context.Canceled {
@@ -105,8 +107,10 @@ func (ls *LeaseServer) LeaseKeepAlive(stream pb.Lease_LeaseKeepAliveServer) (err
 
 func (ls *LeaseServer) leaseKeepAlive(stream pb.Lease_LeaseKeepAliveServer) error {
 	for {
+		ls.lg.Info("[check lease] server stream recv start")
 		req, err := stream.Recv()
 		if err == io.EOF {
+			ls.lg.Info("[check lease] server stream recv EOF")
 			return nil
 		}
 		if err != nil {
@@ -115,6 +119,11 @@ func (ls *LeaseServer) leaseKeepAlive(stream pb.Lease_LeaseKeepAliveServer) erro
 					ls.lg.Debug("failed to receive lease keepalive request from gRPC stream", zap.Error(err))
 				} else {
 					plog.Debugf("failed to receive lease keepalive request from gRPC stream (%q)", err.Error())
+				}
+				ev, _ := status.FromError(err)
+				switch ev.Code() {
+				case codes.Unavailable:
+					ls.lg.Info("[check lease] server stream recv unavailable")
 				}
 			} else {
 				if ls.lg != nil {
@@ -127,6 +136,7 @@ func (ls *LeaseServer) leaseKeepAlive(stream pb.Lease_LeaseKeepAliveServer) erro
 			return err
 		}
 
+		ls.lg.Info("[check lease] server stream recv end", zap.Int64("lease-id", int64(req.ID)))
 		// Create header before we sent out the renew request.
 		// This can make sure that the revision is strictly smaller or equal to
 		// when the keepalive happened at the local server (when the local server is the leader)
@@ -136,6 +146,7 @@ func (ls *LeaseServer) leaseKeepAlive(stream pb.Lease_LeaseKeepAliveServer) erro
 		resp := &pb.LeaseKeepAliveResponse{ID: req.ID, Header: &pb.ResponseHeader{}}
 		ls.hdr.fill(resp.Header)
 
+		ls.lg.Info("[check lease] server LeaseRenew start", zap.Int64("lease-id", int64(req.ID)))
 		ttl, err := ls.le.LeaseRenew(stream.Context(), lease.LeaseID(req.ID))
 		if err == lease.ErrLeaseNotFound {
 			err = nil
@@ -147,6 +158,7 @@ func (ls *LeaseServer) leaseKeepAlive(stream pb.Lease_LeaseKeepAliveServer) erro
 		}
 
 		resp.TTL = ttl
+		ls.lg.Info("[check lease] server stream send", zap.Int64("lease-id", int64(req.ID)))
 		err = stream.Send(resp)
 		if err != nil {
 			if isClientCtxErr(stream.Context().Err(), err) {
